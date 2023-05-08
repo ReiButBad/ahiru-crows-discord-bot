@@ -1,7 +1,6 @@
 import traceback
 import discord
 import traceback
-import os
 from aiohttp import ClientSession
 from typing import Literal, Optional, Union
 from discord.ext import commands
@@ -143,25 +142,28 @@ class Lineup(commands.GroupCog):
         users: list = (
             await self.bot.db.query(
                 """
-            SELECT *, meta::id(id) AS id FROM players WHERE roster = $roster
-        """,
+                SELECT *, meta::id(id) AS id FROM players WHERE roster = $roster
+            """,
                 {"roster": roster},
             )
         )[0]["result"]
         listed = {i: [] for i in positions}
         listed.pop("All Rounder")
         for user in users:
-            listed[user["playing_position"]].append(user["id"])
+            listed[user["playing_position"]].append(user)
         embed = discord.Embed(
-            title=f"{roster.capitalize()} roster players",
-            description="\n".join(
-                [
-                    f"**{i[0]}s:** {', '.join([f'<@!{i}>' for i in i[1]])}"
-                    for i in listed.items()
-                ]
-            ),
-            color=discord.Color.random()
+            title=f"{roster.capitalize()} roster players", color=discord.Color.random()
         )
+        for pos in listed.items():
+            embed.add_field(
+                name=f"{pos[0]}s",
+                value=", ".join(
+                    [
+                        "<@!{0}> **({1})**".format(a["id"], a["jersey"] or "N/A")
+                        for a in pos[1]
+                    ]
+                ),
+            )
         await interaction.followup.send(embed=embed)
 
     @app_commands.command()
@@ -175,6 +177,7 @@ class Lineup(commands.GroupCog):
         roster: Literal["main", "sub"],
         playing_position: main_positions_type,
         ign: str,
+        jersey: Optional[app_commands.Range[int, 1, 50]] = None,
     ):
         """
         Adds a member to lineup
@@ -189,9 +192,22 @@ class Lineup(commands.GroupCog):
                 the member's main position, they can have multiple positions but only 1 playing position
             ingame-username:
                 the member's Roblox username (not display name)
+            jersey:
+                the member's jersey number
         """
         await interaction.response.defer()
-        result = await self.bot.db.select(f"players:{member.id}")
+        result = await self.bot.db.query(
+            f"""
+            SELECT * FROM players:{member.id};
+
+            SELECT 1 FROM players WHERE jersey = {jersey};
+        """
+        )
+        if len(result[1]["result"]) == 1:
+            return await interaction.followup.send(
+                f"Jersey number {jersey} is already taken"
+            )
+        result = result[0]["result"][0] if len(result[0]["result"]) == 1 else None
         if result is not None:
             return await interaction.followup.send(
                 "This person is already in the lineup, maybe you want to edit this person's info? in that case use the `lineup edit` command"
@@ -212,8 +228,8 @@ class Lineup(commands.GroupCog):
             text="cannot remove position that is set to 'playing-position'"
         )
         embed.add_field(
-            name="Playing position",
-            value=f"<@&{roles[playing_position]}>",
+            name="Playing position & Jersey number",
+            value=f"<@&{roles[playing_position]}> ({jersey})",
             inline=False,
         )
         embed.add_field(name="Roster", value=roster.capitalize(), inline=False)
@@ -241,6 +257,7 @@ class Lineup(commands.GroupCog):
                     "positions": view.positions,
                     "playing_position": playing_position,
                     "roster": roster,
+                    "jersey": jersey,
                 },
             )
         except Exception as e:
@@ -271,6 +288,7 @@ class Lineup(commands.GroupCog):
         roster: Optional[Literal["main", "sub"]] = None,
         playing_position: Optional[main_positions_type] = None,
         ign: Optional[str] = None,
+        jersey: Optional[app_commands.Range[int, 1, 50]] = None,
     ):
         """
         Edit a member lineup info
@@ -285,18 +303,25 @@ class Lineup(commands.GroupCog):
                 the member's new main position, they can have multiple positions but only 1 playing position
             ingame-username:
                 the member's new Roblox username (not display name)
+            jersey:
+                the member's new jersey number
         """
         await interaction.response.defer()
-        result = await self.bot.db.select(f"players:{member.id}")
+        result = await self.bot.db.query(
+            f"""
+            SELECT * FROM players:{member.id};
+
+            SELECT 1 FROM players WHERE jersey = {jersey};
+        """
+        )
+        if len(result[1]["result"]) == 1:
+            return await interaction.followup.send(
+                f"Jersey number {jersey} is already taken"
+            )
+        result = result[0]["result"][0] if len(result[0]["result"]) == 1 else None
         if result is None:
             return await interaction.followup.send(
                 "This person is not in the lineup, maybe you want to ad this person? in that case use the `lineup add` command"
-            )
-
-        rblx_user = await self.get_user_by_name(ign)
-        if rblx_user is None:
-            return await interaction.followup.send(
-                f"Cannot find Roblox user by the name of `{ign}`"
             )
 
         playing_position: positions_type = (
@@ -305,6 +330,15 @@ class Lineup(commands.GroupCog):
         roster: str = roster or result["roster"]
         user_positions: list[positions_type] = result["positions"]
         old_ign = await self.get_user_by_id(result["rblx_id"])
+
+        if ign is not None:
+            rblx_user = await self.get_user_by_name(ign)
+        else:
+            rblx_user = old_ign
+        if rblx_user is None:
+            return await interaction.followup.send(
+                f"Cannot find Roblox user by the name of `{ign}`"
+            )
 
         if playing_position not in user_positions:
             user_positions.append(playing_position)
@@ -320,8 +354,8 @@ class Lineup(commands.GroupCog):
             text="cannot remove position that is set to 'playing-position'"
         )
         embed.add_field(
-            name="Playing position",
-            value=f"<@&{roles[playing_position]}>",
+            name="Playing position & Jersey number",
+            value=f"<@&{roles[playing_position]}> ({(jersey or result['jersey']) or 'N/A'})",
             inline=False,
         )
         embed.add_field(name="Roster", value=roster.capitalize(), inline=False)
@@ -354,6 +388,7 @@ class Lineup(commands.GroupCog):
                     "positions": view.positions,
                     "playing_position": playing_position,
                     "roster": roster,
+                    "jersey": jersey or result["jersey"],
                 },
             )
         except Exception as e:
@@ -405,7 +440,6 @@ class Lineup(commands.GroupCog):
             embed.add_field(
                 name="Roblox username",
                 value="{0} (@{1})".format(user["displayName"], user["name"]),
-                inline=False,
             )
         else:
             embed.description = "*⚠️ Failed to find this member's Roblox ⚠️*"
@@ -415,11 +449,9 @@ class Lineup(commands.GroupCog):
                 format_roles(positions_to_roles(result["positions"])),
                 f"<@&{roles[result['playing_position']]}>",
             ),
-            inline=False,
         )
-        embed.add_field(
-            name="Roster", value=result["roster"].capitalize(), inline=False
-        )
+        embed.add_field(name="Roster", value=result["roster"].capitalize())
+        embed.add_field(name="Jersey number", value=result["jersey"] or "N/A")
 
         await interaction.followup.send(embed=embed)
 
