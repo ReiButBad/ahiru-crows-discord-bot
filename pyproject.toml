@@ -10,6 +10,7 @@ dependencies = [
     "jishaku>=2.5.1",
     "setuptools>=67.7.2",
     "python-dotenv>=1.0.0",
+    "surrealdb>=0.3.1",
 ]
 requires-python = ">=3.10"
 license = {text = "WTFPL"}
@@ -20,3 +21,7 @@ build-backend = "pdm.pep517.api"
 
 [tool]
 [tool.pdm]
+[tool.pdm.dev-dependencies]
+dev = [
+    "black>=23.3.0",
+]
