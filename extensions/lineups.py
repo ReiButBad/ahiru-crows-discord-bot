@@ -159,7 +159,7 @@ class Lineup(commands.GroupCog):
                 name=f"{pos[0]}s",
                 value=", ".join(
                     [
-                        "<@!{0}> **({1})**".format(a["id"], a["jersey"] or "N/A")
+                        "<@{0}> **({1})**".format(a["id"], a["jersey"] or "N/A")
                         for a in pos[1]
                     ]
                 ),
